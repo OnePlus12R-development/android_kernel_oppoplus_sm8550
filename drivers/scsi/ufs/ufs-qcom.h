@@ -235,20 +235,45 @@ enum unipro_dme_errCode {
 	UNIPRO_DME_ERR_MAX
 };
 
-enum unipro_err_time_stamp {
-	UNIPRO_0_STAMP,
-	UNIPRO_1_STAMP,
-	UNIPRO_2_STAMP,
-	UNIPRO_3_STAMP,
-	UNIPRO_4_STAMP,
-	UNIPRO_5_STAMP,
-	UNIPRO_6_STAMP,
-	UNIPRO_7_STAMP,
-	UNIPRO_8_STAMP,
-	UNIPRO_9_STAMP,
-	STAMP_RECORD_MAX
+struct ufs_transmission_status_t
+{
+	u8  transmission_status_enable;
+
+	u64 gear_min_write_sec;
+	u64 gear_max_write_sec;
+	u64 gear_min_read_sec;
+	u64 gear_max_read_sec;
+
+	u64 gear_min_write_us;
+	u64 gear_max_write_us;
+	u64 gear_min_read_us;
+	u64 gear_max_read_us;
+
+	u64 gear_min_dev_us;
+	u64 gear_max_dev_us;
+
+	u64 gear_min_other_sec;
+	u64 gear_max_other_sec;
+	u64 gear_min_other_us;
+	u64 gear_max_other_us;
+
+	u64 scsi_send_count;
+	u64 dev_cmd_count;
+
+	u64 active_count;
+	u64 active_time;
+	u64 resume_timing;
+
+	u64 sleep_count;
+	u64 sleep_time;
+	u64 suspend_timing;
+
+	u64 powerdown_count;
+	u64 powerdown_time;
+
+	u64 power_total_count;
+	u32 current_pwr_mode;
 };
-#define STAMP_MIN_INTERVAL ((ktime_t)600000000000) /*ns, 10min*/
 
 struct signal_quality {
 	u32 ufs_device_err_cnt;
@@ -266,9 +291,7 @@ struct signal_quality {
 	u32 unipro_TL_err_cnt[UNIPRO_TL_ERR_MAX];
 	u32 unipro_DME_err_total_cnt;
 	u32 unipro_DME_err_cnt[UNIPRO_DME_ERR_MAX];
-	/* first 10 error cnt, interval is 10min at least */
-	ktime_t stamp[STAMP_RECORD_MAX];
-	int stamp_pos;
+	u32 gear_err_cnt[UFS_HS_G5 + 1];
 };
 
 struct unipro_signal_quality_ctrl {
@@ -634,11 +657,14 @@ struct ufs_qcom_host {
 	atomic_t scale_up;
 	atomic_t clks_on;
 	unsigned long load_delay_ms;
-#define NUM_REQS_HIGH_THRESH 64
+#define NUM_REQS_JUDGE_THRESH 100
+#define REQS_JUDGE_SHORT_TIME 50000000
+#define REQS_JUDGE_LONG_TIME 150000000
+
 #define NUM_REQS_LOW_THRESH 32
 	atomic_t num_reqs_threshold;
 	bool cur_freq_vote;
-	struct delayed_work fwork;
+	struct work_struct fwork;
 	bool cpufreq_dis;
 	unsigned int min_cpu_scale_freq;
 	unsigned int max_cpu_scale_freq;
@@ -654,6 +680,7 @@ struct ufs_qcom_host {
 	cpumask_t perf_mask;
 	cpumask_t def_mask;
 	u32 vccq_lpm_uV;
+	ktime_t throughput_judge_time;
 };
 
 static inline u32

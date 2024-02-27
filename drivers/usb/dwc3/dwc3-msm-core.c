@@ -584,6 +584,9 @@ struct dwc3_msm {
 	int			refcnt_dp_usb;
 	enum dp_lane		dp_state;
 	bool			dynamic_disable;
+#ifdef OPLUS_FEATURE_CHG_BASIC
+	bool			force_disconnect;
+#endif
 };
 
 #define USB_HSPHY_3P3_VOL_MIN		3050000 /* uV */
@@ -598,30 +601,17 @@ struct dwc3_msm {
 #define USB_SSPHY_1P8_VOL_MAX		1800000 /* uV */
 #define USB_SSPHY_1P8_HPM_LOAD		23000	/* uA */
 
+#ifdef OPLUS_FEATURE_CHG_BASIC
+static bool (*oplus_ignore_usb_notify)(void);
+void oplus_dwc3_config_usbphy_pfunc(bool (*pfunc)(void))
+{
+	oplus_ignore_usb_notify = pfunc;
+}
+EXPORT_SYMBOL(oplus_dwc3_config_usbphy_pfunc);
+#endif
+
 /* unfortunately, dwc3 core doesn't manage multiple dwc3 instances for trace */
 void *dwc_trace_ipc_log_ctxt;
-
-#ifdef OPLUS_FEATURE_CHG_BASIC
-static bool (*oplus_ignore_none_role)(void);
-void oplus_dwc3_config_ssr_pfunc(bool (*pfunc)(void))
-{
-	oplus_ignore_none_role = pfunc;
-}
-EXPORT_SYMBOL(oplus_dwc3_config_ssr_pfunc);
-
-static bool oplus_dwc3_get_ssr_status(void)
-{
-	bool ret = false;
-
-	if (oplus_ignore_none_role == NULL) {
-		ret = false;
-	} else {
-		ret = oplus_ignore_none_role();
-	}
-
-	return ret;
-}
-#endif
 
 static void dwc3_pwr_event_handler(struct dwc3_msm *mdwc);
 
@@ -4811,12 +4801,6 @@ static int dwc3_msm_set_role(struct dwc3_msm *mdwc, enum usb_role role)
 	dev_err(mdwc->dev,
 		"%s: cur_role:%s new_role:%s\n",
 		__func__,usb_role_string(cur_role),usb_role_string(role));
-
-	if (oplus_dwc3_get_ssr_status() == true && role == USB_ROLE_NONE) {
-		pr_err("%s !!!ignore none if ssr crash\n");
-		mutex_unlock(&mdwc->role_switch_mutex);
-		return 0;
-	}
 #endif
 
 	/*
@@ -6455,6 +6439,12 @@ static int dwc3_otg_start_peripheral(struct dwc3_msm *mdwc, int on)
 		msm_dwc3_perf_vote_update(mdwc, true);
 		schedule_delayed_work(&mdwc->perf_vote_work,
 				msecs_to_jiffies(1000 * PM_QOS_SAMPLE_SEC));
+#ifdef OPLUS_FEATURE_CHG_BASIC
+		if (mdwc->force_disconnect) {
+			usb_gadget_connect(dwc->gadget);
+			mdwc->force_disconnect = false;
+		}
+#endif
 	} else {
 		dev_dbg(mdwc->dev, "%s: turn off gadget\n", __func__);
 		cancel_delayed_work_sync(&mdwc->perf_vote_work);
@@ -6481,13 +6471,29 @@ static int dwc3_otg_start_peripheral(struct dwc3_msm *mdwc, int on)
 		 * or pullup disable), and retry suspend again.
 		 */
 		ret = pm_runtime_put_sync(&mdwc->dwc3->dev);
+#ifdef OPLUS_FEATURE_CHG_BASIC
+		if (ret < 0) {
+#else
 		if (ret == -EBUSY) {
+#endif
 			while (--timeout && dwc->connected)
 				msleep(20);
 			dbg_event(0xFF, "StopGdgt connected", dwc->connected);
 			pm_runtime_suspend(&mdwc->dwc3->dev);
 		}
 
+#ifdef OPLUS_FEATURE_CHG_BASIC
+		if ((dwc->connected) && (timeout == 0)) {
+			usb_gadget_disconnect(dwc->gadget);
+			timeout = 10;
+			while (timeout && !pm_runtime_suspended(dwc->dev)) {
+				msleep(20);
+				timeout--;
+			}
+			mdwc->force_disconnect = true;
+			dbg_event(0xFF, "Force Disconnect", mdwc->force_disconnect);
+		}
+#endif
 		/* wait for LPM, to ensure h/w is reset after stop_peripheral */
 		set_bit(WAIT_FOR_LPM, &mdwc->inputs);
 	}

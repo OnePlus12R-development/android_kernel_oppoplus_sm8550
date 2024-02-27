@@ -44,6 +44,13 @@
 #include <../kernel/oplus_cpu/oplus_overload/task_overload.h>
 #endif
 
+#if IS_ENABLED(CONFIG_OPLUS_FEATURE_FAKE_CAP)
+#include <../kernel/oplus_cpu/sched/eas_opt/fake_cap.h>
+#endif
+#if IS_ENABLED(CONFIG_OPLUS_CPUFREQ_IOWAIT_PROTECT)
+#include <../kernel/oplus_cpu/sched/eas_opt/oplus_iowait.h>
+#endif
+
 const char *task_event_names[] = {
 	"PUT_PREV_TASK",
 	"PICK_NEXT_TASK",
@@ -1653,7 +1660,11 @@ static inline unsigned int load_to_freq(struct rq *rq, unsigned int load)
 		 (unsigned int)arch_scale_cpu_capacity(cpu_of(rq)));
 }
 
+#if IS_ENABLED(CONFIG_OPLUS_CPUFREQ_IOWAIT_PROTECT)
+static bool do_pl_notif(struct rq *rq, bool in_iowait)
+#else
 static bool do_pl_notif(struct rq *rq)
+#endif
 {
 	struct walt_rq *wrq = (struct walt_rq *) rq->android_vendor_data1;
 	u64 prev = wrq->old_busy_time;
@@ -1663,6 +1674,10 @@ static bool do_pl_notif(struct rq *rq)
 	/* If already at max freq, bail out */
 	if (capacity_orig_of(cpu) == capacity_curr_of(cpu))
 		return false;
+#if IS_ENABLED(CONFIG_OPLUS_CPUFREQ_IOWAIT_PROTECT)
+	if (in_iowait)
+		return true;
+#endif
 
 	prev = max(prev, wrq->old_estimated_time);
 
@@ -2400,13 +2415,20 @@ static void walt_update_task_ravg(struct task_struct *p, struct rq *rq, int even
 	update_task_demand(p, rq, event, wallclock);
 	update_cpu_busy_time(p, rq, event, wallclock, irqtime);
 	update_task_pred_demand(rq, p, event);
+#if IS_ENABLED(CONFIG_OPLUS_CPUFREQ_IOWAIT_PROTECT)
+	if (sysctl_oplus_iowait_skip_min_enabled) {
+		if (event == PUT_PREV_TASK && READ_ONCE(p->__state))
+			wts->iowaited = p->in_iowait;
+	}
+#else
 	if (event == PUT_PREV_TASK && READ_ONCE(p->__state))
 		wts->iowaited = p->in_iowait;
+#endif
 
 	trace_sched_update_task_ravg(p, rq, event, wallclock, irqtime,
-				&wrq->grp_time, wrq, wts, atomic64_read(&walt_irq_work_lastq_ws));
+			&wrq->grp_time, wrq, wts, atomic64_read(&walt_irq_work_lastq_ws));
 	trace_sched_update_task_ravg_mini(p, rq, event, wallclock, irqtime,
-				&wrq->grp_time, wrq, wts, atomic64_read(&walt_irq_work_lastq_ws));
+			&wrq->grp_time, wrq, wts, atomic64_read(&walt_irq_work_lastq_ws));
 
 done:
 	wts->mark_start = wallclock;
@@ -3838,6 +3860,9 @@ static void update_cpu_capacity_helper(int cpu)
 	unsigned long thermal_cap, old;
 	struct walt_sched_cluster *cluster;
 	struct rq *rq = cpu_rq(cpu);
+#if IS_ENABLED(CONFIG_OPLUS_FEATURE_FAKE_CAP)
+	int cluster_id;
+#endif
 
 	if (unlikely(walt_disabled))
 		return;
@@ -3857,10 +3882,23 @@ static void update_cpu_capacity_helper(int cpu)
 					 cluster->max_possible_freq);
 
 	old = rq->cpu_capacity_orig;
+#if IS_ENABLED(CONFIG_OPLUS_FEATURE_FAKE_CAP)
+	cluster_id = topology_physical_package_id(cpu);
+	if (eas_opt_enable && cluster_id >= 0 && cluster_id < FAKE_CLUSTERS)
+		rq->cpu_capacity_orig = mult_frac(min(fmax_capacity, thermal_cap), fake_cap_multiple[cluster_id], 100);
+	else
+		rq->cpu_capacity_orig = min(fmax_capacity, thermal_cap);
+	real_cpu_cap[cpu] = min(fmax_capacity, thermal_cap);
+#else
 	rq->cpu_capacity_orig = min(fmax_capacity, thermal_cap);
+#endif
 
 	if (old != rq->cpu_capacity_orig)
 		trace_update_cpu_capacity(cpu, fmax_capacity, rq->cpu_capacity_orig);
+#if IS_ENABLED(CONFIG_OPLUS_FEATURE_FAKE_CAP)
+	if (unlikely(eas_opt_debug_enable))
+		fake_cap_systrace_c(cpu, rq->cpu_capacity_orig, real_cpu_cap[cpu]);
+#endif
 }
 
 /*
@@ -3873,6 +3911,10 @@ static void android_rvh_update_cpu_capacity(void *unused, int cpu, unsigned long
 
 	update_cpu_capacity_helper(cpu);
 	*capacity = max((int)(cpu_rq(cpu)->cpu_capacity_orig - rt_pressure), 0);
+#if IS_ENABLED(CONFIG_OPLUS_FEATURE_FAKE_CAP)
+	if (unlikely(eas_opt_debug_enable))
+		fake_cap_systrace_c(cpu, cpu_rq(cpu)->cpu_capacity_orig, real_cpu_cap[cpu]);
+#endif
 }
 
 /**
@@ -4299,6 +4341,9 @@ static void android_rvh_enqueue_task(void *unused, struct rq *rq, struct task_st
 	struct walt_task_struct *wts = (struct walt_task_struct *) p->android_vendor_data1;
 	struct walt_rq *wrq = (struct walt_rq *) rq->android_vendor_data1;
 	bool double_enqueue = false;
+#if IS_ENABLED(CONFIG_OPLUS_CPUFREQ_IOWAIT_PROTECT)
+	bool in_iowait = sysctl_oplus_iowait_boost_enabled && (!!p->in_iowait);
+#endif
 
 	if (unlikely(walt_disabled))
 		return;
@@ -4347,8 +4392,18 @@ static void android_rvh_enqueue_task(void *unused, struct rq *rq, struct task_st
 	if (!double_enqueue)
 		walt_inc_cumulative_runnable_avg(rq, p);
 
+#if IS_ENABLED(CONFIG_OPLUS_CPUFREQ_IOWAIT_PROTECT)
+	if ((flags & ENQUEUE_WAKEUP) && do_pl_notif(rq, in_iowait))
+	{
+		if (in_iowait)
+			waltgov_run_callback(rq, WALT_CPUFREQ_PL|WALT_CPUFREQ_IOWAIT);
+		else
+			waltgov_run_callback(rq, WALT_CPUFREQ_PL);
+	}
+#else
 	if ((flags & ENQUEUE_WAKEUP) && do_pl_notif(rq))
 		waltgov_run_callback(rq, WALT_CPUFREQ_PL);
+#endif
 
 	trace_sched_enq_deq_task(p, 1, cpumask_bits(p->cpus_ptr)[0], is_mvp(wts));
 }
@@ -4489,6 +4544,10 @@ static void android_rvh_tick_entry(void *unused, struct rq *rq)
 
 	if (is_ed_task_present(rq, wallclock, NULL))
 		waltgov_run_callback(rq, WALT_CPUFREQ_EARLY_DET);
+
+#if IS_ENABLED(CONFIG_OPLUS_FEATURE_FRAME_BOOST)
+	fbg_game_ed(rq);
+#endif
 }
 
 static void android_vh_scheduler_tick(void *unused, struct rq *rq)

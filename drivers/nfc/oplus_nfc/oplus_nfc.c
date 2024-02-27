@@ -135,8 +135,9 @@ static int oplus_nfc_probe(struct platform_device *pdev)
 	} else
 	{
 		pr_err("%s, get chipset_node content = %s", __func__, chipset_node);
-		strncpy(current_chipset, chipset_node, sizeof(current_chipset));
-		support_nfc = true;
+                strncpy(current_chipset, chipset_node, sizeof(current_chipset) - 1);
+                current_chipset[sizeof(current_chipset) - 1] = '\0';
+                support_nfc = true;
 	}
 
 	nfc_info = proc_mkdir("oplus_nfc", NULL);

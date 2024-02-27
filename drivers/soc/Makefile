@@ -67,3 +67,11 @@ obj-$(CONFIG_OPLUS_FEATURE_MDMFEATURE)     += oplus/mdmfeature/
 #ifdef OPLUS_FEATURE_MODEM_MINIDUMP
 obj-$(CONFIG_OPLUS_FEATURE_RECORD_MDMRST)     += oplus/mdmrst/
 #endif /*OPLUS_FEATURE_MODEM_MINIDUMP*/
+
+#ifdef OPLUS_FREEZE_DEBUG
+obj-$(CONFIG_OPLUS_FREEZE_DEBUG)     += oplus/power/freeze_debug/
+#endif /* OPLUS_FREEZE_DEBUG */
+
+#ifdef OPLUS_SUBSYS_SLEEP_MONITOR
+obj-$(CONFIG_OPLUS_SUBSYS_SLEEP_MONITOR)     += oplus/power/subsys_sleep_monitor/
+#endif /* OPLUS_SUBSYS_SLEEP_MONITOR */

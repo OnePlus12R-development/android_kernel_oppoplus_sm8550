@@ -97,6 +97,7 @@ qcom_rimps.ko
 c1dcvs_vendor.ko
 c1dcvs_scmi.ko
 bcl_pmic5.ko
+test-kit.ko
 oplusboot.ko
 oplus_ftm_mode.ko
 buildvariant.ko
@@ -117,10 +118,12 @@ oplus_security_guard.ko
 oplus_security_keventupload.ko
 oplus_secure_common.ko
 oplus_bsp_sched_assist.ko
+oplus_bsp_eas_opt.ko
 oplus_bsp_frame_boost.ko
-cpu_jankinfo.ko
+oplus_schedinfo.ko
 cpufreq_bouncing.ko
 oplus_omrg.ko
+oplus_freqqos_monitor.ko
 cpufreq_effiency.ko
 oplus_bsp_task_sched.ko
 cpufreq_uag.ko
@@ -130,6 +133,11 @@ oplus_pmicwd.ko
 qpnp-power-on.ko
 oplus_fdleak_check.ko
 qcom_enhance_watchdog.ko
+ordump.ko
 nvme-core.ko
 nvme.ko
 task_overload.ko
+oplus_ipa_thermal.ko
+oplus_freeze_debug.ko
+oplus_subsys_sleep_monitor.ko
+oplus_procs_load.ko

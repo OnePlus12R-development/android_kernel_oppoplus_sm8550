@@ -94,12 +94,20 @@ static struct platform_driver qcom_dma_heap_driver = {
 #if IS_ENABLED(CONFIG_OPLUS_FEATURE_MM_OSVELTE)
 extern atomic64_t qcom_dma_heap_pool;
 extern atomic64_t qcom_system_heap_total;
+#if IS_ENABLED(CONFIG_OPLUS_FEATURE_MM_BOOSTPOOL)
+extern atomic64_t boost_pool_pages;
+#endif /* CONFIG_OPLUS_FEATURE_MM_BOOSTPOOL */
+
 long read_dmabuf_mem_usage(enum mtrack_subtype type)
 {
 	if (type == MTRACK_DMABUF_SYSTEM_HEAP)
 		return atomic64_read(&qcom_system_heap_total) >> PAGE_SHIFT;
 	else if (type == MTRACK_DMABUF_POOL)
 		return atomic64_read(&qcom_dma_heap_pool);
+#if IS_ENABLED(CONFIG_OPLUS_FEATURE_MM_BOOSTPOOL)
+	else if (type == MTRACK_DMABUF_BOOST_POOL)
+		return atomic64_read(&boost_pool_pages);
+#endif /* CONFIG_OPLUS_FEATURE_MM_BOOSTPOOL */
 
 	return 0;
 }

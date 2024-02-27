@@ -12,6 +12,9 @@
 #if IS_ENABLED(CONFIG_OPLUS_FEATURE_SCHED_ASSIST)
 #include <../../oplus_cpu/sched/sched_assist/sa_fair.h>
 #endif
+#if IS_ENABLED(CONFIG_OPLUS_FEATURE_LOADBALANCE)
+#include <../../oplus_cpu/sched/sched_assist/sa_balance.h>
+#endif
 #if IS_ENABLED(CONFIG_OPLUS_FEATURE_FRAME_BOOST)
 #include <../kernel/oplus_cpu/sched/frame_boost/frame_group.h>
 #endif
@@ -673,7 +676,14 @@ void walt_lb_tick(struct rq *rq)
 	struct walt_task_struct *wts = (struct walt_task_struct *) p->android_vendor_data1;
 #if IS_ENABLED(CONFIG_OPLUS_FEATURE_FRAME_BOOST)
 	bool need_up_migrate = false;
+#endif
 
+#if IS_ENABLED(CONFIG_OPLUS_FEATURE_LOADBALANCE)
+	if (__oplus_tick_balance(NULL, rq))
+		return;
+#endif
+
+#if IS_ENABLED(CONFIG_OPLUS_FEATURE_FRAME_BOOST)
 	if (fbg_need_up_migration(p, rq))
 		need_up_migrate = true;
 #endif
@@ -857,6 +867,11 @@ static void walt_newidle_balance(void *unused, struct rq *this_rq,
 	bool help_min_cap = false, find_next_cluster = false;
 	int first_idle;
 	int has_misfit = 0;
+
+#if IS_ENABLED(CONFIG_OPLUS_FEATURE_LOADBALANCE)
+	if (__oplus_newidle_balance(unused, this_rq, rf, pulled_task, done))
+		return;
+#endif
 
 	if (unlikely(walt_disabled))
 		return;
