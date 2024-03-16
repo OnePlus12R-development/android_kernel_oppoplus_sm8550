@@ -190,7 +190,11 @@
 
 #define ADT_BRK_DUTY_EN_BIT			BIT(6)
 #define DRV_DUTY_MASK				GENMASK(5, 3)
+#ifdef OPLUS_FEATURE_CHG_BASIC
+#define DRV_DUTY_62P5_PCT			4
+#else
 #define DRV_DUTY_62P5_PCT			2
+#endif
 #define DRV_DUTY_SHIFT				3
 #define BRK_DUTY_MASK				GENMASK(2, 0)
 #define BRK_DUTY_75_PCT			6
@@ -776,7 +780,8 @@ struct haptics_chip *g_richtap_ptr;
 static void richtap_clean_buf(struct haptics_chip *chip, int status);
 #endif //OPLUS_FEATURE_RICHTAP_SUPPORT
 #ifdef OPLUS_FEATURE_CHG_BASIC
-	struct haptics_chip *g_chip;
+struct haptics_chip *g_chip;
+static int haptics_toggle_module_enable(struct haptics_chip *chip);
 #endif
 
 static inline int get_max_fifo_samples(struct haptics_chip *chip)
@@ -1193,21 +1198,31 @@ static int haptics_get_status_data(struct haptics_chip *chip,
 static int haptics_wait_brake_complete(struct haptics_chip *chip)
 {
 	struct haptics_play_info *play = &chip->play;
-	u32 brake_length_us, timeout, delay_us;
+	u32 brake_length_us, t_lra_us, timeout, delay_us;
 	int rc;
 	u8 val;
 
 	if (chip->hw_type != HAP525_HV)
 		return 0;
 
+#ifdef OPLUS_FEATURE_CHG_BASIC
+	t_lra_us = (chip->config.cl_t_lra_us) ?
+			chip->config.cl_t_lra_us : chip->config.t_lra_us;
+#endif
+
 	brake_length_us = get_brake_play_length_us(play->brake, chip->config.cl_t_lra_us);
 
 	/* add a cycle to give some margin for brake sychronization */
+#ifdef OPLUS_FEATURE_CHG_BASIC
+	brake_length_us += t_lra_us;
+	delay_us = t_lra_us / 2;
+#else
 	brake_length_us += chip->config.cl_t_lra_us;
 	if (chip->config.cl_t_lra_us)
 		delay_us = chip->config.cl_t_lra_us / 2;
 	else
 		delay_us = chip->config.t_lra_us / 2;
+#endif
 
 	timeout = brake_length_us / delay_us + 1;
 	dev_dbg(chip->dev, "wait %d us for brake pattern to complete\n", brake_length_us);
@@ -1230,8 +1245,12 @@ static int haptics_wait_brake_complete(struct haptics_chip *chip)
 				timeout, val);
 	} while (--timeout);
 
-	if (timeout == 0)
+	if (timeout == 0) {
 		dev_warn(chip->dev, "poll HPWR_DISABLED failed after stopped play\n");
+#ifdef OPLUS_FEATURE_CHG_BASIC
+		return haptics_toggle_module_enable(chip);
+#endif
+	}
 
 	return 0;
 }
@@ -3633,7 +3652,14 @@ static int haptics_init_vmax_config(struct haptics_chip *chip)
 	/* Set the initial clamped vmax value when hBoost is used by charger firmware */
 	chip->clamped_vmax_mv = MAX_HV_VMAX_MV;
 	/* Config VMAX */
+#ifndef OPLUS_FEATURE_CHG_BASIC
 	return haptics_set_vmax_mv(chip, chip->config.vmax_mv);
+#else
+	/* init set vmax return 0 to force vibrator driver continue from QCOM */
+	rc = haptics_set_vmax_mv(chip, chip->config.vmax_mv);
+	dev_err(chip->dev, "haptics_set_vmax_mv return %d\n", rc);
+	return 0;
+#endif
 }
 
 static int haptics_config_wa(struct haptics_chip *chip)
@@ -5778,7 +5804,11 @@ static int haptics_detect_lra_frequency(struct haptics_chip *chip)
 
 	if (chip->hw_type == HAP525_HV)
 		val = AUTORES_EN_DLY_7_CYCLES << AUTORES_EN_DLY_SHIFT|
+#ifdef OPLUS_FEATURE_CHG_BASIC
+			AUTORES_ERR_WINDOW_50_PERCENT | AUTORES_EN_BIT;
+#else
 			AUTORES_ERR_WINDOW_25_PERCENT | AUTORES_EN_BIT;
+#endif
 	else
 		val = AUTORES_EN_DLY_6_CYCLES << AUTORES_EN_DLY_SHIFT|
 			AUTORES_ERR_WINDOW_50_PERCENT | AUTORES_EN_BIT;
@@ -6760,7 +6790,11 @@ static ssize_t register_write_store(struct class *c,
 	u16 reg;
 	u8 val;
 
+#ifdef OPLUS_FEATURE_CHG_BASIC
+	if (2 == sscanf(buf, "%hx %hhx", &reg, &val)) {
+#else
 	if (2 == sscanf(buf, "%x %x", &reg, &val)) {
+#endif
 		if(reg >= 0xf000 && reg < 0xf300) {
 			rc = regmap_update_bits(chip->regmap, reg, 0xFF, val);
 			if (rc < 0)
@@ -6924,7 +6958,6 @@ static ssize_t haptic_test_duration_write(struct file *filp,
 	}
 	/*	critical_log = atoi(write_data);*/
 	/*	sprintf(critical_log,"%d",(void *)write_data);*/
-	write_data[len] = '\0';
 	if (write_data[len - 1] == '\n') {
 		write_data[len - 1] = '\0';
 	}
@@ -6985,7 +7018,6 @@ static ssize_t haptic_test_times_write(struct file *filp,
 	}
 	/*	critical_log = atoi(write_data);*/
 	/*	sprintf(critical_log,"%d",(void *)write_data);*/
-	write_data[len] = '\0';
 	if (write_data[len - 1] == '\n') {
 		write_data[len - 1] = '\0';
 	}

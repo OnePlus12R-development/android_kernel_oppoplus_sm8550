@@ -30,10 +30,6 @@ config OPLUS_SYSTEM_KERNEL
   help
 	define this config to add oplus sytstem kernel feature
 
-#ifdef OPLUS_BUG_STABILITY
-source "drivers/soc/oplus/system/Kconfig"
-#endif /* OPLUS_BUG_STABILITY */
-
 #ifdef OPLUS_FEATURE_MM_FEEDBACK
 source "drivers/soc/oplus/multimedia/Kconfig"
 #endif /* OPLUS_FEATURE_MM_FEEDBACK */
@@ -78,6 +74,10 @@ source "kernel/oplus_cpu/cpufreq_effiency/Kconfig"
 source "kernel/oplus_cpu/cpufreq_bouncing/Kconfig"
 #endif /* OPLUS_FEATURE_GKI_CPUFREQ_BOUNCING */
 
+#ifdef OPLUS_FEATURE_FREQQOS_MONITOR
+source "kernel/oplus_cpu/freqqos_monitor/Kconfig"
+#endif /* OPLUS_FEATURE_FREQQOS_MONITOR */
+
 source "kernel/oplus_cpu/uad/Kconfig"
 
 #ifdef OPLUS_FEATURE_MDMFEATURE
@@ -96,3 +96,15 @@ endmenu
 #ifdef OPLUS_FEATURE_TP_BASIC
 source "drivers/soc/oplus/device_info/Kconfig"
 #endif /* OPLUS_FEATURE_TP_BASIC */
+
+#ifdef OPLUS_FEATURE_ABNORMAL_FLAG
+source "kernel/oplus_cpu/oplus_overload/Kconfig"
+#endif /* OPLUS_FEATURE_ABNORMAL_FLAgit G */
+
+#ifdef OPLUS_FREEZE_DEBUG
+source "drivers/soc/oplus/power/freeze_debug/Kconfig"
+#endif /* OPLUS_FREEZE_DEBUG */
+
+#ifdef OPLUS_SUBSYS_SLEEP_MONITOR
+source "drivers/soc/oplus/power/subsys_sleep_monitor/Kconfig"
+#endif /* OPLUS_SUBSYS_SLEEP_MONITOR */

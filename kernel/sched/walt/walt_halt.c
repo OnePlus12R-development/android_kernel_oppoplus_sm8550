@@ -12,6 +12,14 @@
 #if IS_ENABLED(CONFIG_OPLUS_FEATURE_TASK_SCHED)
 #include <../kernel/oplus_cpu/sched/task_sched/task_sched_info.h>
 #endif
+#ifdef CONFIG_OPLUS_ADD_CORE_CTRL_MASK
+#if IS_ENABLED(CONFIG_OPLUS_FEATURE_FRAME_BOOST)
+#include <../kernel/oplus_cpu/sched/frame_boost/frame_group.h>
+#endif
+#if IS_ENABLED(CONFIG_OPLUS_FEATURE_SCHED_ASSIST)
+#include <../kernel/oplus_cpu/sched/sched_assist/sa_fair.h>
+#endif
+#endif /* CONFIG_OPLUS_ADD_CORE_CTRL_MASK */
 #ifdef CONFIG_HOTPLUG_CPU
 
 /* if a cpu is halting */
@@ -584,6 +592,15 @@ void walt_halt_init(void)
 
 	sched_setscheduler_nocheck(walt_drain_thread, SCHED_FIFO, &param);
 
+#ifdef CONFIG_OPLUS_ADD_CORE_CTRL_MASK
+#if IS_ENABLED(CONFIG_OPLUS_FEATURE_FRAME_BOOST)
+	init_fbg_halt_mask(&__cpu_halt_mask);
+#endif
+
+#if IS_ENABLED(CONFIG_OPLUS_FEATURE_SCHED_ASSIST)
+	init_ux_halt_mask(&__cpu_halt_mask);
+#endif
+#endif /* CONFIG_OPLUS_ADD_CORE_CTRL_MASK */
 	register_trace_android_rvh_get_nohz_timer_target(android_rvh_get_nohz_timer_target, NULL);
 	register_trace_android_rvh_set_cpus_allowed_by_task(
 						android_rvh_set_cpus_allowed_by_task, NULL);

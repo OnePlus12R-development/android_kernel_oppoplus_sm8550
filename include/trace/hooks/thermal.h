@@ -8,7 +8,15 @@
 #define _TRACE_HOOK_THERMAL_H
 
 #include <trace/hooks/vendor_hooks.h>
+
+#ifdef __GENKSYMS__
 #include <linux/cpufreq.h>
+#include <linux/thermal.h>
+#endif
+
+struct cpufreq_policy;
+struct thermal_cooling_device;
+struct thermal_zone_device;
 
 /* struct thermal_cooling_device, struct thermal_zone_device */
 #include <linux/thermal.h>
@@ -31,6 +39,10 @@ DECLARE_HOOK(android_vh_thermal_unregister,
 DECLARE_HOOK(android_vh_enable_thermal_power_throttle,
 	TP_PROTO(bool *enable, bool *override),
 	TP_ARGS(enable, override));
+
+DECLARE_HOOK(android_vh_modify_thermal_throttle_update,
+	TP_PROTO(struct thermal_zone_device *tz, bool *update),
+	TP_ARGS(tz, update));
 
 DECLARE_HOOK(android_vh_thermal_power_cap,
 	TP_PROTO(u32 *power_range),

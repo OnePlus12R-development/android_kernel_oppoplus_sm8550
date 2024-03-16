@@ -566,7 +566,7 @@ out:
 
 EXPORT_SYMBOL(oem_qmi_common_req);
 
-
+/*
 static ssize_t uim_qmi_power_up_debug(struct file *file,
 	const char __user *user_buf,
 	size_t count, loff_t *ppos)
@@ -581,7 +581,7 @@ static ssize_t uim_qmi_power_up_debug(struct file *file,
 		ret = -EFAULT;
 		return ret;
 	}
-
+	buf[7] = '\0';
 	slot = simple_strtol(buf, NULL, 0) / 10;
 	power_up = simple_strtol(buf, NULL, 0) % 10;
 
@@ -675,16 +675,16 @@ out:
 
 	return ret;
 }
-
+*/
 static const struct file_operations uim_power_fops = {
 	.open = simple_open,
-	.write = uim_qmi_power_up_debug,
+	/*.write = uim_qmi_power_up_debug,*/
 };
 
 
 static const struct file_operations oem_common_fops = {
 	.open = simple_open,
-	.write = oem_qmi_common_debug,
+	/*.write = oem_qmi_common_debug,*/
 };
 
 

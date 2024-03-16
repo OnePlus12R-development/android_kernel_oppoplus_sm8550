@@ -321,7 +321,7 @@ static ssize_t horae_qmi_write(struct file *filp, const char __user *buf,
 	int ret, len;
 	unsigned long state = 0;
 	char tmp[BUF_LEN + 1];
-	char name[NAME_LEN];
+	char name[BUF_LEN + 1];
 
 	if (count == 0)
 		return 0;

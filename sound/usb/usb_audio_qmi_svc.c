@@ -226,7 +226,7 @@ int uaudio_qmi_ctrl_msg(struct usb_device *dev, unsigned int pipe, __u8 request,
 		    __u8 requesttype, __u16 value, __u16 index, void *data,
 		    __u16 size)
 {
-	int err;
+	int err = 0;
 	void *buf = NULL;
 	int timeout;
 
@@ -244,10 +244,14 @@ int uaudio_qmi_ctrl_msg(struct usb_device *dev, unsigned int pipe, __u8 request,
 	else
 		timeout = USB_CTRL_SET_TIMEOUT;
 
-	err = usb_control_msg(dev, pipe, request, requesttype,
-			      value, index, buf, size, timeout);
-
 	if (size > 0) {
+		err = usb_control_msg(dev, pipe, request, requesttype,
+		      value, index, buf, size, timeout);
+		if (err < 0) {
+			dev_err(&dev->dev, "usb_control_msg returned %d\n", err);
+			kfree(buf);
+			return err;
+		}
 		memcpy(data, buf, size);
 		kfree(buf);
 	}
@@ -1500,6 +1504,11 @@ static int enable_audio_stream(struct snd_usb_substream *subs,
 	_snd_pcm_hw_param_set(&params, SNDRV_PCM_HW_PARAM_RATE,
 			cur_rate, 0);
 
+#ifdef OPLUS_FEATURE_CHG_BASIC
+	if (!chip->intf[0])
+		return -ENODEV;
+#endif
+
 	pm_runtime_barrier(&chip->intf[0]->dev);
 	snd_usb_autoresume(chip);
 
@@ -1563,7 +1572,11 @@ static int enable_audio_stream(struct snd_usb_substream *subs,
 				 BUS_INTERVAL_FULL_SPEED));
 	}
 
+#ifdef OPLUS_FEATURE_CHG_BASIC
+	return ret;
+#else
 	return 0;
+#endif
 }
 
 static void handle_uaudio_stream_req(struct qmi_handle *handle,
@@ -1663,7 +1676,7 @@ static void handle_uaudio_stream_req(struct qmi_handle *handle,
 	}
 
 	uadev[pcm_card_num].ctrl_intf = chip->ctrl_intf;
-
+	atomic_inc(&chip->usage_count);
 	if (req_msg->enable) {
 		ret = enable_audio_stream(subs,
 				map_pcm_format(req_msg->audio_format),
@@ -1698,6 +1711,9 @@ static void handle_uaudio_stream_req(struct qmi_handle *handle,
 
 		disable_audio_stream(subs);
 	}
+
+	if (atomic_dec_and_test(&chip->usage_count) && atomic_read(&chip->shutdown))
+		wake_up(&chip->shutdown_wait); /* add this to handle the disconnect during enable_audio_stream not completed and prepare_qmi_response not executed. */
 
 response:
 	if (!req_msg->enable && ret != -EINVAL && ret != -ENODEV) {

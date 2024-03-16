@@ -117,4 +117,4 @@ obj-$(CONFIG_TOUCHPANEL_CUSTOM) += touch_custom/
 obj-$(CONFIG_TOUCHPANEL_OPLUS) += oplus_touchscreen_v2/
 obj-$(CONFIG_TOUCHSCREEN_ZINITIX)	+= zinitix.o
 
-obj-y += synaptics_thp/
+obj-y += synaptics_hbp/

@@ -84,3 +84,6 @@ obj-$(CONFIG_HAPTIC_FEEDBACK) += aw8697_haptic/
 
 obj-$(CONFIG_QSEECOM_PROXY) 	+= qseecom_proxy.o
 
+#ifdef OPLUS_POWER_PROCS_LOAD
+obj-$(CONFIG_OPLUS_POWER_PROCS_LOAD) += oplus_procs_load/
+#endif /* OPLUS_POWER_PROCS_LOAD */

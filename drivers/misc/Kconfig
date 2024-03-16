@@ -542,6 +542,14 @@ config HAPTIC_FEEDBACK
     help
       This option enables support for Haptic Driver Feedback.
 
+#ifdef OPLUS_POWER_PROCS_LOAD
+config OPLUS_POWER_PROCS_LOAD
+    tristate "oplus power procs load feature"
+    default n
+    help
+      define this config to enable oplus power procs load feature.
+#endif /* OPLUS_POWER_PROCS_LOAD */
+
 source "drivers/misc/c2port/Kconfig"
 source "drivers/misc/eeprom/Kconfig"
 source "drivers/misc/cb710/Kconfig"

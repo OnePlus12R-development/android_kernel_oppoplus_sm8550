@@ -28,6 +28,14 @@
 #include <../kernel/oplus_cpu/sched/frame_boost/frame_group.h>
 #endif
 
+#if IS_ENABLED(CONFIG_OPLUS_CPUFREQ_IOWAIT_PROTECT)
+#include <../kernel/oplus_cpu/sched/eas_opt/oplus_iowait.h>
+#endif
+
+#if IS_ENABLED(CONFIG_OPLUS_FEATURE_FAKE_CAP)
+#include <../kernel/oplus_cpu/sched/eas_opt/fake_cap.h>
+#endif
+
 #ifdef CONFIG_OPLUS_FEATURE_SUGOV_TL
 /* Target load. Lower values result in higher CPU speeds. */
 #define DEFAULT_TARGET_LOAD 80
@@ -103,6 +111,9 @@ struct waltgov_policy {
 #if IS_ENABLED(CONFIG_OPLUS_FEATURE_FRAME_BOOST)
 	unsigned int		flags;
 #endif
+#if IS_ENABLED(CONFIG_OPLUS_CPUFREQ_IOWAIT_PROTECT)
+	u64			last_update;
+#endif
 };
 
 struct waltgov_cpu {
@@ -114,6 +125,11 @@ struct waltgov_cpu {
 	unsigned long		max;
 	unsigned int		flags;
 	unsigned int		reasons;
+#if IS_ENABLED(CONFIG_OPLUS_CPUFREQ_IOWAIT_PROTECT)
+	bool			iowait_boost_pending;
+	unsigned int		iowait_boost;
+	u64			last_update;
+#endif
 };
 
 DEFINE_PER_CPU(struct waltgov_callback *, waltgov_cb_data);
@@ -574,6 +590,140 @@ static inline unsigned long target_util(struct waltgov_policy *wg_policy,
 	return util;
 }
 
+#if IS_ENABLED(CONFIG_OPLUS_CPUFREQ_IOWAIT_PROTECT)
+/**
+ * sugov_iowait_reset() - Reset the IO boost status of a CPU.
+ * @sg_cpu: the sugov data for the CPU to boost
+ * @time: the update time from the caller
+ * @set_iowait_boost: true if an IO boost has been requested
+ *
+ * The IO wait boost of a task is disabled after a tick since the last update
+ * of a CPU. If a new IO wait boost is requested after more then a tick, then
+ * we enable the boost starting from IOWAIT_BOOST_MIN, which improves energy
+ * efficiency by ignoring sporadic wakeups from IO.
+ */
+#define IOWAIT_BOOST_MIN (SCHED_CAPACITY_SCALE / 8)
+static bool waltgov_iowait_reset(struct waltgov_cpu *sg_cpu, u64 time,
+		bool set_iowait_boost)
+{
+	s64 delta_ns = time - sg_cpu->last_update;
+	unsigned int ticks = TICK_NSEC;
+
+	if (sysctl_iowait_reset_ticks)
+		ticks = sysctl_iowait_reset_ticks * TICK_NSEC;
+
+	/* Reset boost only if enough ticks has elapsed since last request. */
+	if (delta_ns <= ticks)
+		return false;
+
+	if (set_iowait_boost)
+		sg_cpu->iowait_boost = IOWAIT_BOOST_MIN;
+	else
+		sg_cpu->iowait_boost = 0;
+
+	sg_cpu->iowait_boost_pending = set_iowait_boost;
+
+	return true;
+}
+/**
+ * walt_iowait_boost() - Updates the IO boost status of a CPU.
+ * @sg_cpu: the sugov data for the CPU to boost
+ * @time: the update time from the caller
+ * @flags: SCHED_CPUFREQ_IOWAIT if the task is waking up after an IO wait
+ *
+ * Each time a task wakes up after an IO operation, the CPU utilization can be
+ * boosted to a certain utilization which doubles at each "frequent and
+ * successive" wakeup from IO, ranging from IOWAIT_BOOST_MIN to the utilization
+ * of the maximum OPP.
+ *
+ * To keep doubling, an IO boost has to be requested at least once per tick,
+ * otherwise we restart from the utilization of the minimum OPP.
+ */
+static void waltgov_iowait_boost(struct waltgov_cpu *sg_cpu, u64 time,
+		unsigned int flags)
+{
+	bool set_iowait_boost = flags & WALT_CPUFREQ_IOWAIT;
+
+	/* Reset boost if the CPU appears to have been idle enough */
+	if (sg_cpu->iowait_boost && waltgov_iowait_reset(sg_cpu, time, set_iowait_boost))
+		return;
+
+	/* Boost only tasks waking up after IO */
+	if (!set_iowait_boost)
+		return;
+
+	/* Ensure boost doubles only one time at each request */
+	if (sg_cpu->iowait_boost_pending)
+		return;
+	sg_cpu->iowait_boost_pending = true;
+
+	/* Double the boost at each request */
+	if (sg_cpu->iowait_boost) {
+		sg_cpu->iowait_boost = min_t(unsigned int, sg_cpu->iowait_boost << 1, SCHED_CAPACITY_SCALE);
+		return;
+	}
+
+	/* First wakeup after IO: start with minimum boost */
+	sg_cpu->iowait_boost = IOWAIT_BOOST_MIN;
+}
+
+/**
+ * sugov_iowait_apply() - Apply the IO boost to a CPU.
+ * @sg_cpu: the sugov data for the cpu to boost
+ * @time: the update time from the caller
+ * @util: the utilization to (eventually) boost
+ * @max: the maximum value the utilization can be boosted to
+ *
+ * A CPU running a task which woken up after an IO operation can have its
+ * utilization boosted to speed up the completion of those IO operations.
+ * The IO boost value is increased each time a task wakes up from IO, in
+ * sugov_iowait_apply(), and it's instead decreased by this function,
+ * each time an increase has not been requested (!iowait_boost_pending).
+ *
+ * A CPU which also appears to have been idle for at least one tick has also
+ * its IO boost utilization reset.
+ *
+ * This mechanism is designed to boost high frequently IO waiting tasks, while
+ * being more conservative on tasks which does sporadic IO operations.
+ */
+static unsigned long waltgov_iowait_apply(struct waltgov_cpu *sg_cpu, u64 time,
+		unsigned long util, unsigned long max)
+{
+	struct waltgov_policy *sg_policy = sg_cpu->wg_policy;
+	unsigned long boost;
+
+	/* No boost currently required */
+	if (!sg_cpu->iowait_boost)
+		return util;
+
+	/* Reset boost if the CPU appears to have been idle enough */
+	if (waltgov_iowait_reset(sg_cpu, time, false))
+		return util;
+
+	if (!sg_cpu->iowait_boost_pending &&
+			(!sysctl_iowait_apply_ticks ||
+			 (time - sg_policy->last_update > (sysctl_iowait_apply_ticks * TICK_NSEC)))) {
+		/*
+		 * No boost pending; reduce the boost value.
+		 */
+		sg_cpu->iowait_boost >>= 1;
+		if (sg_cpu->iowait_boost < IOWAIT_BOOST_MIN) {
+			sg_cpu->iowait_boost = 0;
+			return util;
+		}
+	}
+
+	sg_cpu->iowait_boost_pending = false;
+
+	/*
+	 * @util is already in capacity scale; convert iowait_boost
+	 * into the same scale so we can compare.
+	 */
+	boost = (sg_cpu->iowait_boost * max) >> SCHED_CAPACITY_SHIFT;
+	return max(boost, util);
+}
+#endif
+
 static unsigned int waltgov_next_freq_shared(struct waltgov_cpu *wg_cpu, u64 time)
 {
 	struct waltgov_policy *wg_policy = wg_cpu->wg_policy;
@@ -581,11 +731,23 @@ static unsigned int waltgov_next_freq_shared(struct waltgov_cpu *wg_cpu, u64 tim
 	unsigned long util = 0, max = 1;
 	unsigned int j;
 	int boost = wg_policy->tunables->boost;
+#if IS_ENABLED(CONFIG_OPLUS_FEATURE_FAKE_CAP)
+	unsigned long util_thresh = 0;
+	unsigned long util_orig = 0;
+	unsigned int avg_nr_running = 1;
+	unsigned int count_cpu = 0;
+	int cluster_id = topology_physical_package_id(cpumask_first(policy->cpus));
+#endif
 
 	for_each_cpu(j, policy->cpus) {
 		struct waltgov_cpu *j_wg_cpu = &per_cpu(waltgov_cpu, j);
 		unsigned long j_util, j_max, j_nl;
+#if IS_ENABLED(CONFIG_OPLUS_FEATURE_FAKE_CAP)
+		struct rq *rq = cpu_rq(j);
 
+		avg_nr_running += rq->nr_running;
+		count_cpu++;
+#endif
 		/*
 		 * If the util value for all CPUs in a policy is 0, just using >
 		 * will result in a max value of 1. WALT stats can later update
@@ -596,6 +758,13 @@ static unsigned int waltgov_next_freq_shared(struct waltgov_cpu *wg_cpu, u64 tim
 		j_util = j_wg_cpu->util;
 		j_nl = j_wg_cpu->walt_load.nl;
 		j_max = j_wg_cpu->max;
+
+#if IS_ENABLED(CONFIG_OPLUS_CPUFREQ_IOWAIT_PROTECT)
+		j_util = waltgov_iowait_apply(j_wg_cpu, time, j_util, j_max);
+		if (unlikely(eas_opt_debug_enable))
+			trace_printk("[eas_opt]: enable_iowait_boost=%d, cpu:%d, max:%d, cpu->util:%d,iowait_util:%d\n",
+					sysctl_oplus_iowait_boost_enabled, j_wg_cpu->cpu, j_wg_cpu->max, j_wg_cpu->util, j_util);
+#endif
 		if (boost) {
 			j_util = mult_frac(j_util, boost + 100, 100);
 			j_nl = mult_frac(j_nl, boost + 100, 100);
@@ -612,6 +781,24 @@ static unsigned int waltgov_next_freq_shared(struct waltgov_cpu *wg_cpu, u64 tim
 
 #if IS_ENABLED(CONFIG_OPLUS_FEATURE_FRAME_BOOST)
 	fbg_freq_policy_util(wg_policy->flags, policy->cpus, &util);
+#endif
+#if IS_ENABLED(CONFIG_OPLUS_FEATURE_FAKE_CAP)
+	if (eas_opt_enable && (util_thresh_percent[cluster_id] != 100) && count_cpu) {
+		//util_thresh = mult_frac(max, util_thresh_percent[cluster_id], 100);
+		util_thresh = max * util_thresh_cvt[cluster_id] >> SCHED_CAPACITY_SHIFT;
+		avg_nr_running = mult_frac(avg_nr_running, 1, count_cpu);
+		util_orig = util;
+		//util = avg_nr_running * util * fake_cap_multiple[4] * 1024 / fake_cap_multiple[cluster_id] >>  SCHED_CAPACITY_SHIFT;
+		util = (util_thresh < util) ?
+			(util_thresh + ((avg_nr_running * (util-util_thresh) * nr_fake_cap_multiple[cluster_id]) >> SCHED_CAPACITY_SHIFT)) : util;
+		if (unlikely(eas_opt_debug_enable))
+		{
+			trace_printk("[eas_opt]: cluster_id: %d, capacity: %d, util_thresh: %d, util_orig: %d, util: %d, avg_nr_running: %d, "
+					"fake_cap_multiple: %d,nr_fake_cap_multiple: %d, util_thresh: %d\n",
+					cluster_id, max, util_thresh, util_orig, util, avg_nr_running,
+					fake_cap_multiple[cluster_id], nr_fake_cap_multiple[cluster_id], util_thresh_percent[cluster_id]);
+		}
+	}
 #endif
 	return get_next_freq(wg_policy, util, max, wg_cpu, time);
 }
@@ -651,7 +838,10 @@ static void waltgov_update_freq(struct waltgov_callback *cb, u64 time,
 				    wg_policy->tunables->rtg_boost_freq);
 		wg_policy->rtg_boost_util = rtg_boost_util;
 	}
-
+#if IS_ENABLED(CONFIG_OPLUS_CPUFREQ_IOWAIT_PROTECT)
+	waltgov_iowait_boost(wg_cpu, time, flags);
+	wg_cpu->last_update = time;
+#endif
 	waltgov_calc_avg_cap(wg_policy, wg_cpu->walt_load.ws,
 			   wg_policy->policy->cur);
 
@@ -666,6 +856,9 @@ static void waltgov_update_freq(struct waltgov_callback *cb, u64 time,
 
 		if (!next_f)
 			goto out;
+#if IS_ENABLED(CONFIG_OPLUS_CPUFREQ_IOWAIT_PROTECT)
+		wg_policy->last_update = time;
+#endif
 
 		if (wg_policy->policy->fast_switch_enabled)
 			waltgov_fast_switch(wg_policy, time, next_f);

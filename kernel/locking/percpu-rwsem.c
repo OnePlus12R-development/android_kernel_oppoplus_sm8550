@@ -167,6 +167,7 @@ static void percpu_rwsem_wait(struct percpu_rw_semaphore *sem, bool reader)
 	if (wait) {
 		wq_entry.flags |= WQ_FLAG_EXCLUSIVE | reader * WQ_FLAG_CUSTOM;
 		__add_wait_queue_entry_tail(&sem->waiters, &wq_entry);
+		trace_android_vh_percpu_rwsem_wq_add(sem, reader);
 	}
 	spin_unlock_irq(&sem->waiters.lock);
 
@@ -285,6 +286,7 @@ void percpu_up_write(struct percpu_rw_semaphore *sem)
 	 * exclusive write lock because its counting.
 	 */
 	rcu_sync_exit(&sem->rss);
+	trace_android_vh_record_pcpu_rwsem_starttime(current, 0);
 }
 EXPORT_SYMBOL_GPL(percpu_up_write);
 

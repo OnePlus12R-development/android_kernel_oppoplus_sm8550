@@ -608,12 +608,6 @@ static void qcom_wdt_ping_other_cpus(struct msm_watchdog_data *wdog_dd)
 	oplus_get_cpu_ping_mask(&mask, wdog_dd->cpu_idle_pc_state);
 #endif
 
-#if IS_ENABLED(CONFIG_OPLUS_FEATURE_QCOM_WATCHDOG)
-	/* donelle@BSP, print more info on pet watchdog */
-	cpumask_t mask;
-	oplus_get_cpu_ping_mask(&mask, wdog_dd->cpu_idle_pc_state);
-#endif
-
 	cpumask_clear(&wdog_dd->alive_mask);
 	/* Make sure alive mask is cleared and set in order */
 	smp_mb();
@@ -684,6 +678,7 @@ static __ref int qcom_wdt_kthread(void *arg)
 		/* for UCT time print, over 30s print once */
 		oplus_show_utc_time();
 #endif
+		
 		/* Check again before scheduling
 		 * Could have been changed on other cpu
 		 */
@@ -810,7 +805,7 @@ static irqreturn_t qcom_wdt_bark_handler(int irq, void *dev_id)
 #if IS_ENABLED(CONFIG_OPLUS_FEATURE_QCOM_WATCHDOG)
 	/* donelle@BSP, print online cpu */
 	oplus_dump_cpu_online_smp_call();
-	oplus_dump_wdog_cpu(wdog_dd->watchdog_task);
+	oplus_dump_wdog_cpu(wdog_dd->watchdog_task);	
 	/* donelle@BSP,  delete trigger wdog bite, panic will trigger wdog if in dload mode*/
 	panic("Handle a watchdog bite! - Falling back to kernel panic!");
 #else
@@ -818,6 +813,7 @@ static irqreturn_t qcom_wdt_bark_handler(int irq, void *dev_id)
 	md_dump_process();
 	qcom_wdt_trigger_bite();
 #endif
+	
 	return IRQ_HANDLED;
 }
 

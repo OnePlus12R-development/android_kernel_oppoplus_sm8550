@@ -44,4 +44,10 @@ config OPLUS_FEATURE_SUGOV_TL
 	depends on SCHED_WALT
 	help
 	  Add target_loads sysfs attr in cpufreq walt governor.
+
+config OPLUS_FEATURE_WINDOW_POLICY
+	bool
+	default y
+	help
+	 This feature will support different walt window history policy.
 endmenu
